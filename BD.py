@@ -9,11 +9,7 @@ class ConexionBD:
     host = "dpg-cug0gl5ds78s73fq5j6g-a.oregon-postgres.render.com"
     port = 5432  # Puerto predeterminado para PostgreSQL
     dbname = "integraservicios_lqna"
-    categoriaCatalogo = 1
-    seleccionTipoCamiseta = str
-    idUsuarioValido = str
-    seleccionCategoria = str
-    total = str
+ 
 
     @staticmethod
     def conectar():
@@ -40,7 +36,7 @@ class ConexionBD:
             return False
         try:
             cursor = conexion.cursor()
-            query = "SELECT idpersona, correoelectronico, contrasena FROM persona WHERE correoelectronico = %s AND contrasena = %s"
+            query = "SELECT id_usuario, email, contrasena FROM usuario WHERE email = %s AND contrasena = %s"
             cursor.execute(query, (correo, contrasena))
             result = cursor.fetchone()
             if result:
