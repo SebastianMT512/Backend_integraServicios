@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from datetime import date, time
-from BD import ConexionBD
+from BD import ConexionBD,TokenHandler
+
 
 class Login(BaseModel):
     correo: str
@@ -50,7 +51,7 @@ class Devolucion(BaseModel):
     hora_devolucion: time
     id_empleado: int
     
-API_KEY = "super_secret_token"  # Cambia esto por una clave más segura
+
 
 app = FastAPI()
 
@@ -69,9 +70,9 @@ app.add_middleware(
 @app.post('/validate')
 async def validate_user(l: Login):
     try:
-        valid = ConexionBD.validarLogin(l.correo, l.contrasena)
-        if valid:
-            return {"message": "Logeado correctamente", "codigo": 202}
+        token = ConexionBD.validarLogin(l.correo, l.contrasena)
+        if token:
+            return {"message": "Logeado correctamente", "token": token}
         else:
             raise HTTPException(status_code=404, detail="El correo o la contraseña son incorrectos")
     except Exception as e:
@@ -148,6 +149,10 @@ async def add_reservation(reserva: Reserva):
     Endpoint para crear una nueva reserva, seleccionando automáticamente un recurso disponible dentro del tipo de recurso solicitado.
     """
     try:
+        hoy = date.today()
+        if reserva.fecha_reserva < hoy:
+            raise HTTPException(status_code=400, detail="No puedes registrar un préstamo en una fecha pasada.")
+        
         resultado = ConexionBD.crearReserva(
             reserva.id_usuario,
             reserva.id_tipo_recurso,
@@ -187,14 +192,6 @@ async def finish_reservation(s: ReservaCancelar):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-"""@app.get('/Consultar reserva')
-async def get_reservation(s: Reserva):
-    try:
-        result = ConexionBD.consultarReserva(s.idReserva)
-        return {"data": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))"""
     
 
 @app.get('/consultarRecursos')
@@ -262,11 +259,28 @@ async def obtener_reservas_vigentes(id_usuario: int):
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.post('/registrarPrestamo')
-async def registrar_prestamo(prestamo: Prestamo):
+async def registrar_prestamo(prestamo: Prestamo, authorization: str = Header(None)):
     """
-    Registra un préstamo validando que el empleado esté registrado y que la reserva esté vigente.
+    Registra un préstamo validando el token JWT y que el empleado esté registrado.
     """
     try:
+        print("Authorization Header recibido:", authorization)
+        if not authorization:
+            raise HTTPException(status_code=403, detail="Token no proporcionado.")
+
+        token = authorization.split("Bearer ")[-1]  # Extrae el token de "Bearer TOKEN"
+        id_usuario = TokenHandler.verificar_token(token)
+
+        if not id_usuario:
+            raise HTTPException(status_code=403, detail="Token inválido o expirado.")
+
+        # Validar si el usuario tiene una reserva vigente
+        reservas = ConexionBD.consultarReservasVigentes(id_usuario)
+        if isinstance(reservas, str) or not reservas:
+            raise HTTPException(status_code=400, detail="No hay reservas vigentes para este usuario.")
+        hoy = date.today()
+        if prestamo.fecha_prestamo < hoy:
+            raise HTTPException(status_code=400, detail="No puedes registrar un préstamo en una fecha pasada.")
         resultado = ConexionBD.registrarPrestamo(
             prestamo.id_reserva,
             prestamo.id_empleado,
@@ -311,14 +325,10 @@ async def registrar_devolucion(devolucion: Devolucion):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get('/api/recursosDisponibles')
-async def obtener_recursos_disponibles(api_key: str = Header(None)):
+async def obtener_recursos_disponibles():
     """
     Permite a servicios externos consultar los recursos disponibles.
-    Se requiere un token de API válido en los headers para acceder.
     """
-    if api_key != API_KEY:
-        raise HTTPException(status_code=403, detail="Acceso no autorizado. Token inválido.")
-
     try:
         resultado = ConexionBD.consultarRecursosDisponibles()
         if isinstance(resultado, str):  # Si es un mensaje de error o sin resultados

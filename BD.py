@@ -1,6 +1,78 @@
 import psycopg2
 import json
-from datetime import datetime, date
+import jwt
+import os
+import bcrypt
+import re
+from datetime import datetime, timedelta , date, timezone
+
+
+SECRET_KEY = "super-secret-key"  # Usa una variable de entorno para mayor seguridad
+ALGORITHM = "HS256"
+TOKEN_EXPIRATION_MINUTES = 60  # Expira en 1 hora
+
+class TokenHandler:
+    @staticmethod
+    def generar_token(id_usuario):
+        """
+        Genera un token JWT con el ID del usuario.
+        """
+        expira = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_EXPIRATION_MINUTES)
+        payload = {"id_usuario": id_usuario, "exp": expira}
+        token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+        return token
+
+
+    @staticmethod
+    def verificar_token(token):
+        """
+        Verifica si un token JWT es válido y devuelve el ID del usuario si es correcto.
+        """
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+            # Verificar si el token ha expirado manualmente
+            exp = payload.get("exp")
+            if exp and datetime.now(timezone.utc).timestamp() > exp:
+                print("Error: Token expirado")  # 🔍 Para depuración
+                return None
+            
+            return payload.get("id_usuario")  # Extraemos el ID del usuario del token
+
+        except jwt.ExpiredSignatureError:
+            print("Error: Token expirado (jwt.ExpiredSignatureError)")
+            return None
+        except jwt.InvalidTokenError as e:
+            print("Error: Token inválido", e)
+            return None
+
+
+class PasswordHandler:
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """
+        Genera un hash de la contraseña usando bcrypt.
+        
+        Args:
+            password: Contraseña en texto plano
+            
+        Returns:
+            str: Hash de la contraseña
+        """
+        # Convertimos la contraseña a bytes y generamos el hash
+        password_bytes = password.encode('utf-8')
+        # Generamos un salt y hacemos el hash
+        salt = bcrypt.gensalt()
+        password_hash = bcrypt.hashpw(password_bytes, salt)
+        # Retornamos el hash como string
+        return password_hash.decode('utf-8')
+    
+    @staticmethod
+    def verificar_contrasena(contrasena_ingresada, contrasena_encriptada):
+        """
+        Compara una contraseña ingresada con su versión encriptada.
+        """
+        return bcrypt.checkpw(contrasena_ingresada.encode('utf-8'), contrasena_encriptada.encode('utf-8'))    
 
 class ConexionBD:
 
@@ -31,23 +103,35 @@ class ConexionBD:
 
     @staticmethod
     def validarLogin(correo, contrasena):
+        """
+        Valida el login de un usuario comparando la contraseña encriptada.
+        """
         conexion = ConexionBD.conectar()
         if not conexion:
             return False
+
         try:
             cursor = conexion.cursor()
-            query = "SELECT id_usuario, email, contrasena FROM usuario WHERE email = %s AND contrasena = %s"
-            cursor.execute(query, (correo, contrasena))
-            result = cursor.fetchone()
+            query = "SELECT id_usuario, contrasena FROM usuario WHERE email = %s"
+            cursor.execute(query, (correo,))
+            result = cursor.fetchone()  # Obtiene una fila con (id_usuario, contrasena)
+
             if result:
-                ConexionBD.idUsuarioValido = result[0]
-                return True
-            return False
+                id_usuario, contrasena_encriptada = result  # Extrae los valores correctamente
+                
+                # Verificar la contraseña
+                if PasswordHandler.verificar_contrasena(contrasena, contrasena_encriptada):
+                    ConexionBD.idUsuarioValido = id_usuario
+                    token = TokenHandler.generar_token(id_usuario)
+                    return token 
+
+            return False  # Si no hay resultado o la contraseña es incorrecta
+
         except Exception as e:
             print("Error en validarLogin:", e)
+            return False
         finally:
             conexion.close()
-
     @staticmethod
     def registrarUsuario(nombre, email, telefono, contrasena):
         """
@@ -65,12 +149,13 @@ class ConexionBD:
             if cursor.fetchone():
                 return "El correo ya está registrado."
 
+            contrasena_hash = PasswordHandler.hash_password(contrasena)
             # Insertar el nuevo usuario
             query = """
             INSERT INTO Usuario (Nombre, Email, Telefono, Contrasena)
             VALUES (%s, %s, %s, %s)
             """
-            cursor.execute(query, (nombre, email, telefono, contrasena))
+            cursor.execute(query, (nombre, email, telefono, contrasena_hash))
             conexion.commit()
 
             return "Usuario registrado exitosamente."
@@ -170,6 +255,10 @@ class ConexionBD:
             return f"Error al eliminar el usuario: {str(e)}"
         finally:
             conexion.close()
+
+
+
+
 
     @staticmethod
     def crearReserva(id_usuario, id_tipo_recurso, fecha_reserva, hora_reserva):
@@ -601,11 +690,47 @@ class ConexionBD:
             recursos = cursor.fetchall()
 
             if not recursos:
-                return "No hay recursos disponibles."
+                return {"recursos_disponibles": []}  # Retornar lista vacía si no hay recursos.
 
-            return [{"id_recurso": r[0], "nombre": r[1], "tipo_recurso": r[2], "horario_disponibilidad": r[3]} for r in recursos]
-        
+            def transformar_horario(horario):
+                """
+                Convierte un rango de días en una lista con cada día y su horario.
+                """
+                dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                resultado = []
+
+                # Buscar el formato "Lunes a Viernes 08:00-18:00"
+                import re
+                match = re.match(r"(\w+) a (\w+) (\d{2}:\d{2}-\d{2}:\d{2})", horario)
+
+                if match:
+                    dia_inicio, dia_fin, horas = match.groups()
+                    if dia_inicio in dias_semana and dia_fin in dias_semana:
+                        i_inicio = dias_semana.index(dia_inicio)
+                        i_fin = dias_semana.index(dia_fin)
+                        resultado = [f"{dias_semana[i]} {horas}" for i in range(i_inicio, i_fin + 1)]
+                else:
+                    # Si el formato es solo un día específico
+                    partes = horario.split()
+                    if len(partes) == 2 and partes[0] in dias_semana:
+                        resultado = [horario]
+
+                return resultado
+
+            recursos_formateados = []
+            for r in recursos:
+                recurso = {
+                    "id_recurso": r[0],
+                    "nombre": r[1],
+                    "tipo_recurso": r[2],
+                    "horario_disponibilidad": transformar_horario(r[3])
+                }
+                recursos_formateados.append(recurso)
+
+            return recursos_formateados
+
         except Exception as e:
             return f"Error al consultar recursos disponibles: {str(e)}"
         finally:
             conexion.close()
+
