@@ -30,10 +30,10 @@ class Seleccion(BaseModel):
 
 class Reserva(BaseModel):
     id_usuario: int
-    id_tipo_recurso: int
+    id_recurso: int
     fecha_reserva: date
     hora_reserva: time
-    estado: str
+    estado: str= "Vigente"
 
 class ReservaCancelar(BaseModel):
     id_reserva: int
@@ -78,7 +78,7 @@ async def validate_user(l: Login):
     try:
         valid = ConexionBD.validarLogin(l.correo, l.contrasena)
         if valid:
-            return {"message": "Logeado correctamente"}
+            return {"message": "Logeado correctamente","id_usuario": valid}
         else:
             raise HTTPException(status_code=404, detail="El correo o la contraseña son incorrectos")
     except Exception as e:
@@ -184,11 +184,11 @@ async def add_reservation(reserva: Reserva):
     try:
         hoy = date.today()
         if reserva.fecha_reserva < hoy:
-            raise HTTPException(status_code=400, detail="No puedes registrar un préstamo en una fecha pasada.")
+            raise HTTPException(status_code=400, detail="No puedes registrar una reserva en una fecha pasada.")
         
         resultado = ConexionBD.crearReserva(
             reserva.id_usuario,
-            reserva.id_tipo_recurso,
+            reserva.id_recurso,
             reserva.fecha_reserva,
             reserva.hora_reserva
         )

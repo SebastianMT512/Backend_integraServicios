@@ -122,7 +122,7 @@ class ConexionBD:
                 # Verificar la contraseña
                 if PasswordHandler.verificar_contrasena(contrasena, contrasena_encriptada):
                     ConexionBD.idUsuarioValido = id_usuario
-                    return True
+                    return id_usuario
 
             return False  # Si no hay resultado o la contraseña es incorrecta
 
@@ -320,7 +320,7 @@ class ConexionBD:
 
 
     @staticmethod
-    def crearReserva(id_usuario, id_tipo_recurso, fecha_reserva, hora_reserva):
+    def crearReserva(id_usuario, id_recurso, fecha_reserva, hora_reserva):
         conexion = ConexionBD.conectar()
         if not conexion:
             return "Error al conectar con la base de datos."
@@ -334,42 +334,48 @@ class ConexionBD:
             if not usuario_existe:
                 return "El usuario no está registrado."
 
-            # Obtener recursos disponibles dentro del tipo de recurso solicitado
-            query_recursos = """
-            SELECT Id_Recurso, Horario_Disponibilidad FROM Recurso
-            WHERE ID_Tipo_Recurso = %s AND Estado = 'Disponible'
+            # Obtener el recurso específico y su horario de disponibilidad
+            query_recurso = """
+            SELECT Id_Recurso, Horario_Disponibilidad, Estado FROM Recurso
+            WHERE Id_Recurso = %s
             """
-            cursor.execute(query_recursos, (id_tipo_recurso,))
-            recursos_disponibles = cursor.fetchall()
+            cursor.execute(query_recurso, (id_recurso,))
+            recurso = cursor.fetchone()
 
-            if not recursos_disponibles:
-                return "No hay recursos disponibles en este tipo."
+            if not recurso:
+                return "El recurso no existe."
 
-            # Validar si algún recurso está disponible en el horario solicitado
-            for id_recurso, horario in recursos_disponibles:
-                if ConexionBD.validarHorarioDisponible(horario, hora_reserva):
-                    # Verificar si el recurso ya está reservado en la fecha y hora
-                    query_disponibilidad = """
-                    SELECT ID_Reserva FROM Reserva WHERE ID_Recurso = %s AND Fecha_Reserva = %s AND Hora_Reserva = %s
-                    """
-                    cursor.execute(query_disponibilidad, (id_recurso, fecha_reserva, hora_reserva))
-                    conflicto = cursor.fetchone()
+            id_recurso_db, horario_disponibilidad, estado_recurso = recurso
 
-                    if not conflicto:
-                        # Insertar la reserva con el primer recurso disponible
-                        query_reserva = """
-                        INSERT INTO Reserva (ID_Usuario, ID_Recurso, Fecha_Reserva, Hora_Reserva, Estado)
-                        VALUES (%s, %s, %s, %s, 'Vigente')
-                        """
-                        cursor.execute(query_reserva, (id_usuario, id_recurso, fecha_reserva, hora_reserva))
-                        conexion.commit()
-                        return f"Reserva creada exitosamente con el recurso ID {id_recurso}"
+            # Validar si el recurso está disponible
+            if estado_recurso != 'Disponible':
+                return "El recurso no está disponible."
 
-            return "No hay recursos disponibles en el horario solicitado."
+            # Validar si el horario de la reserva está dentro del horario de disponibilidad
+            if not ConexionBD.validarHorarioDisponible(horario_disponibilidad, hora_reserva):
+                return "El recurso no está disponible en el horario solicitado."
+
+            # Verificar si el recurso ya está reservado en la fecha y hora
+            query_disponibilidad = """
+            SELECT ID_Reserva FROM Reserva WHERE ID_Recurso = %s AND Fecha_Reserva = %s AND Hora_Reserva = %s
+            """
+            cursor.execute(query_disponibilidad, (id_recurso, fecha_reserva, hora_reserva))
+            conflicto = cursor.fetchone()
+
+            if conflicto:
+                return "El recurso ya está reservado en este horario."
+
+            # Insertar la reserva
+            query_reserva = """
+            INSERT INTO Reserva (ID_Usuario, ID_Recurso, Fecha_Reserva, Hora_Reserva, Estado)
+            VALUES (%s, %s, %s, %s, 'Vigente')
+            """
+            cursor.execute(query_reserva, (id_usuario, id_recurso, fecha_reserva, hora_reserva))
+            conexion.commit()
+            return f"Reserva creada exitosamente con el recurso ID {id_recurso}"
 
         except Exception as e:
-            
-            return "Error al crear la reserva."
+            return f"Error al crear la reserva: {str(e)}"
         finally:
             conexion.close()
 
@@ -460,7 +466,7 @@ class ConexionBD:
         except Exception as e:
             print("Error al eliminar la reserva:", e)
         finally:
-            conexion.close()
+            conexion.close()    
             
     @staticmethod
     def consultarRecursos(tipo_recurso=None, estado=None, nombre_recurso=None, orden=None, horario_disponibilidad=None):
