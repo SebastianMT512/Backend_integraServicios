@@ -62,7 +62,7 @@ class Devolucion(BaseModel):
 app = FastAPI()
 
 origins = [
-    "http://localhost:4200"
+    "https://integraservicios-gx5d.onrender.com",
 ]
 
 app.add_middleware(
