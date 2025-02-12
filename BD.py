@@ -392,7 +392,7 @@ class ConexionBD:
             return hora_inicio <= hora_reserva.strftime("%H:%M") <= hora_fin
         return False
     @staticmethod
-    def consultarReserva(idReserva=None):
+    def detallesReserva(idReserva=None):
         """
         Consultar una o todas las reservas.
         """
@@ -600,28 +600,49 @@ class ConexionBD:
     @staticmethod
     def consultarReservasVigentes(id_usuario):
         """
-        Retorna las reservas vigentes de un usuario.
+        Retorna las reservas vigentes de un usuario, incluyendo el nombre del recurso.
         """
         conexion = ConexionBD.conectar()
         if not conexion:
             return "Error al conectar con la base de datos."
-
+        
         try:
             cursor = conexion.cursor()
             query = """
-            SELECT ID_Reserva, Fecha_Reserva, Hora_Reserva, Estado, ID_Recurso
-            FROM Reserva
-            WHERE ID_Usuario = %s AND Estado = 'Vigente'
+            SELECT 
+                r.ID_Reserva, 
+                r.Fecha_Reserva, 
+                r.Hora_Reserva, 
+                r.Estado, 
+                r.ID_Recurso, 
+                rec.Nombre AS Nombre_Recurso
+            FROM Reserva r
+            JOIN Recurso rec ON r.ID_Recurso = rec.ID_Recurso
+            WHERE r.ID_Usuario = %s AND r.Estado = 'Vigente'
             """
             cursor.execute(query, (id_usuario,))
             reservas = cursor.fetchall()
-
+            
             if not reservas:
                 return "No hay reservas vigentes para este usuario."
-
-            return [{"id_reserva": r[0], "fecha_reserva": str(r[1]), "hora_reserva": str(r[2]), "estado": r[3], "id_recurso": r[4]} for r in reservas]
+            
+            # Formatear los resultados
+            resultado = [
+                {
+                    "id_reserva": r[0],
+                    "fecha_reserva": str(r[1]),
+                    "hora_reserva": str(r[2]),
+                    "estado": r[3],
+                    "id_recurso": r[4],
+                    "nombre_recurso": r[5]  # Incluimos el nombre del recurso
+                }
+                for r in reservas
+            ]
+            return resultado
+        
         except Exception as e:
             return f"Error al consultar reservas vigentes: {str(e)}"
+        
         finally:
             conexion.close()
 
