@@ -122,14 +122,73 @@ class ConexionBD:
                 # Verificar la contraseña
                 if PasswordHandler.verificar_contrasena(contrasena, contrasena_encriptada):
                     ConexionBD.idUsuarioValido = id_usuario
-                    token = TokenHandler.generar_token(id_usuario)
-                    return token 
+                    return True
 
             return False  # Si no hay resultado o la contraseña es incorrecta
 
         except Exception as e:
             print("Error en validarLogin:", e)
             return False
+        finally:
+            conexion.close()
+            
+    @staticmethod
+    def validarLoginEmpleado(correo, contrasena):
+        """
+        Valida el login de un usuario comparando la contraseña encriptada.
+        """
+        conexion = ConexionBD.conectar()
+        if not conexion:
+            return False
+        try:
+            cursor = conexion.cursor()
+            query = "SELECT id_empleado, contrasena FROM empleado WHERE email = %s"
+            cursor.execute(query, (correo,))
+            result = cursor.fetchone()  # Obtiene una fila con (id_usuario, contrasena)
+            if result:
+                id_empleado, contrasena_encriptada = result  # Extrae los valores correctamente
+                
+                # Verificar la contraseña
+                if PasswordHandler.verificar_contrasena(contrasena, contrasena_encriptada):
+                    ConexionBD.idUsuarioValido = id_empleado
+                    token = TokenHandler.generar_token(id_empleado)
+                    return token 
+            return False  # Si no hay resultado o la contraseña es incorrecta
+        except Exception as e:
+            print("Error en validarLogin:", e)
+            return False
+        finally:
+            conexion.close()
+    @staticmethod
+    def registrarEmpleado(nombre, cargo, email, contrasena):
+        """
+        Registra un nuevo empleado en la base de datos.
+        """
+        conexion = ConexionBD.conectar()
+        if not conexion:
+            return "Error al conectar con la base de datos."
+
+        try:
+            cursor = conexion.cursor()
+
+            # Verificar si el correo ya está registrado
+            cursor.execute("SELECT ID_Empleado FROM Empleado WHERE Email = %s", (email,))
+            if cursor.fetchone():
+                return "El correo ya está registrado."
+
+            contrasena_hash = PasswordHandler.hash_password(contrasena)
+            # Insertar el nuevo usuario
+            query = """
+            INSERT INTO Empleado (Nombre, Cargo, Email, Contrasena)
+            VALUES (%s, %s, %s, %s)
+            """
+            cursor.execute(query, (nombre, cargo, email, contrasena_hash))
+            conexion.commit()
+
+            return "Empleado registrado exitosamente."
+
+        except Exception as e:
+            return f"Error al registrar el usuario: {str(e)}"
         finally:
             conexion.close()
     @staticmethod

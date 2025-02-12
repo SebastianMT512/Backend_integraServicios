@@ -18,6 +18,12 @@ class Usuario(BaseModel):
     email: str
     telefono: str
     contrasena: str
+    
+class Empleado(BaseModel):
+    nombre: str
+    cargo: str
+    email: str
+    contrasena: str
 
 class Seleccion(BaseModel):
     seleccion: str
@@ -70,15 +76,42 @@ app.add_middleware(
 @app.post('/validate')
 async def validate_user(l: Login):
     try:
-        token = ConexionBD.validarLogin(l.correo, l.contrasena)
+        valid = ConexionBD.validarLogin(l.correo, l.contrasena)
+        if valid:
+            return {"message": "Logeado correctamente"}
+        else:
+            raise HTTPException(status_code=404, detail="El correo o la contraseña son incorrectos")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post('/validateEmpleado')
+async def validate_empleado(l: Login):
+    try:
+        token = ConexionBD.validarLoginEmpleado(l.correo, l.contrasena)
         if token:
             return {"message": "Logeado correctamente", "token": token}
         else:
             raise HTTPException(status_code=404, detail="El correo o la contraseña son incorrectos")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
+    
+@app.post('/registrarEmpleado')
+async def registrar_usuario(empleado: Empleado):
+    """
+    Registra un nuevo usuario en la base de datos.
+    """
+    try:
+        resultado = ConexionBD.registrarEmpleado(
+            empleado.nombre,
+            empleado.cargo,
+            empleado.email,
+            empleado.contrasena
+        )
+        if "Empleado registrado exitosamente" in resultado:
+            return {"message": resultado}
+        raise HTTPException(status_code=400, detail=resultado)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post('/registrarUsuario')
 async def registrar_usuario(usuario: Usuario):
     """
